@@ -3,8 +3,10 @@ package org.runchip.ledcontroller;
 import android.app.Service;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
+import android.os.HandlerThread;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -15,7 +17,6 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
@@ -25,11 +26,9 @@ import java.util.Date;
 public class MainActivity extends AppCompatActivity {
     private static String TAG = "LedController";
 
-    boolean isDeviceConnected;
-    Button btnConnect;
+    Button btnSend;
     EditText editDeviceIP;
     EditText editDevicePort;
-    TextView textStatus;
     TextView textOutput;
     TextView textSeek1;
     TextView textSeek2;
@@ -45,6 +44,10 @@ public class MainActivity extends AppCompatActivity {
 
     private Socket deviceConnection;
     private OutputStream deviceSendStream;
+
+    private HandlerThread networkThread;
+    private Handler networkHandler;
+    private Handler mainHandler;
 
     DhcpInfo getWiFiDhcpInfo() {
         WifiManager wifiManager = (WifiManager) getSystemService(Service.WIFI_SERVICE);
@@ -70,8 +73,7 @@ public class MainActivity extends AppCompatActivity {
         editDeviceIP = (EditText) findViewById(R.id.edit_device_ip);
         editDevicePort = (EditText) findViewById(R.id.edit_device_port);
         scrollOutput = (ScrollView) findViewById(R.id.scroll_output);
-        btnConnect = (Button) findViewById(R.id.button_connect);
-        textStatus = (TextView) findViewById(R.id.text_status_value);
+        btnSend = (Button) findViewById(R.id.button_send);
         textOutput = (TextView) findViewById(R.id.text_output);
         seekLed1 = (SeekBar) findViewById(R.id.seek_led1);
         seekLed2 = (SeekBar) findViewById(R.id.seek_led2);
@@ -95,7 +97,6 @@ public class MainActivity extends AppCompatActivity {
                         ledFreq3 = progress;
                         textSeek3.setText(Integer.toString(ledFreq3));
                     }
-                    sendDeviceControlCommand();
                 }
             }
 
@@ -111,59 +112,103 @@ public class MainActivity extends AppCompatActivity {
         seekLed2.setOnSeekBarChangeListener(listener);
         seekLed3.setOnSeekBarChangeListener(listener);
 
-        btnConnect.setOnClickListener(new View.OnClickListener() {
+        btnSend.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 CharSequence devIP = editDeviceIP.getText();
                 CharSequence devPort = editDevicePort.getText();
-                if (!isValidIP(devIP) || !isValidPort(devPort)) {
-                    printLogToUI("IP or port invalid!");
+                if (!isValidIP(devIP)) {
+                    printLogToUI("IP invalid!");
+                    return;
+                }
+                if (!isValidPort(devPort)) {
+                    printLogToUI("Port invalid!");
                     return;
                 }
 
-                if (!isDeviceConnected) { // no device connected, do connect flow
-                    if (connectToDevice(devIP.toString(), Integer.parseInt(devPort.toString()))) {
-                        btnConnect.setText("Disconnect");
-                        textStatus.setText("Connected");
-                        isDeviceConnected = true;
-                    }
-                } else { // has device connected, do disconnect flow
-                    if (disconnectCurrentDevice()) {
-                        isDeviceConnected = false;
-                        btnConnect.setText("Connect");
-                        textStatus.setText("Offline");
-                    }
+                connectToDevice(devIP.toString(), Integer.parseInt(devPort.toString()));
+                sendDeviceControlCommand();
+                disconnectDevice();
+            }
+        });
+    }
+
+    private void connectToDevice(final String host, final int port) {
+        networkHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    deviceConnection = new Socket(host, port);
+                    deviceSendStream = deviceConnection.getOutputStream();
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            printLogToUI("connect to device success!");
+                        }
+                    });
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            printLogToUI("connect to device failed!");
+                        }
+                    });
                 }
             }
         });
     }
 
-    private boolean disconnectCurrentDevice() {
-        try {
-            deviceConnection.close();
-            deviceConnection = null;
-            deviceSendStream = null;
-            printLogToUI("current device disconnect success!");
-            return true;
-        } catch (IOException e) {
-            e.printStackTrace();
-            printLogToUI("current device disconnect failed");
-            return false;
-        }
+    private void disconnectDevice() {
+        networkHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (deviceConnection == null) return;
+                    deviceConnection.close();
+                    deviceConnection = null;
+                    deviceSendStream = null;
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            printLogToUI("device connection close success!");
+                        }
+                    });
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            printLogToUI("device connection close failed!");
+                        }
+                    });
+                }
+            }
+        });
     }
 
     private void sendDeviceControlCommand() {
-        if (deviceSendStream == null) {
-            printLogToUI("no device connected!");
-            return;
-        }
-        byte[] command = {0x03, 0x00, 0x00, 0x00, 0x4D, 0x3C, 0x2B, 0x1A, (byte) ledFreq1, (byte) ledFreq2, (byte) ledFreq3};
-        try {
-            deviceSendStream.write(command);
-            printLogToUI("control command send success!");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        networkHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (deviceSendStream == null) {
+                    Log.d(TAG, "device connection not established!");
+                    return;
+                }
+                byte[] command = {0x03, 0x00, 0x00, 0x00, 0x4D, 0x3C, 0x2B, 0x1A, (byte) ledFreq1, (byte) ledFreq2, (byte) ledFreq3};
+                try {
+                    deviceSendStream.write(command);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            printLogToUI("control command send success!");
+                        }
+                    });
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
     }
 
     private boolean isValidPort(CharSequence devPort) {
@@ -187,29 +232,23 @@ public class MainActivity extends AppCompatActivity {
         scrollOutput.fullScroll(ScrollView.FOCUS_DOWN);
     }
 
-    private boolean connectToDevice(String host, int port) {
-        try {
-            deviceConnection = new Socket(host, port);
-            deviceSendStream = deviceConnection.getOutputStream();
-            printLogToUI("connect to device success!");
-            return true;
-
-        } catch (IOException e) {
-            e.printStackTrace();
-            printLogToUI("connect to device failed!");
-            return false;
-        }
-    }
-
     private boolean isValidIP(CharSequence devIP) {
         if (devIP == null || devIP.length() == 0) return false;
-        String[] nums = devIP.toString().split(".");
+        String[] nums = devIP.toString().split("\\.");
         if (nums.length != 4) return false;
         for (int i = 0; i < nums.length; i++) {
             int n = Integer.parseInt(nums[i]);
             if (n < 0 || n > 255) return false;
         }
         return true;
+    }
+
+    private void updateDeviceIP() {
+        // get dhcp info
+        DhcpInfo dhcpInfo = getWiFiDhcpInfo();
+        String gateway = intToInetAddress(dhcpInfo.gateway).getHostAddress();
+        editDeviceIP.setText(gateway);
+        printLogToUI("Gateway: " + gateway);
     }
 
     @Override
@@ -221,10 +260,19 @@ public class MainActivity extends AppCompatActivity {
 
         textSeek1.requestFocus();
 
-        // get dhcp info
-        DhcpInfo dhcpInfo = getWiFiDhcpInfo();
-        String gateway = intToInetAddress(dhcpInfo.gateway).getHostAddress();
-        editDeviceIP.setText(gateway);
-        printLogToUI("Gateway: " + gateway);
+        networkThread = new HandlerThread("AppNetworkHandlerThread");
+        networkThread.start();
+
+        networkHandler = new Handler(networkThread.getLooper());
+        mainHandler = new Handler();
+
+        updateDeviceIP();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        updateDeviceIP();
     }
 }
