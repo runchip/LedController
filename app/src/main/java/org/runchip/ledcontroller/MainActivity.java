@@ -1,5 +1,8 @@
 package org.runchip.ledcontroller;
 
+import android.app.Service;
+import android.net.DhcpInfo;
+import android.net.wifi.WifiManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -12,7 +15,10 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.Socket;
+import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
@@ -40,6 +46,24 @@ public class MainActivity extends AppCompatActivity {
     private Socket deviceConnection;
     private OutputStream deviceSendStream;
 
+    DhcpInfo getWiFiDhcpInfo() {
+        WifiManager wifiManager = (WifiManager) getSystemService(Service.WIFI_SERVICE);
+        return wifiManager.getDhcpInfo();
+    }
+
+    public static InetAddress intToInetAddress(int hostAddress) {
+        byte[] addressBytes = { (byte)(0xff & hostAddress),
+                (byte)(0xff & (hostAddress >> 8)),
+                (byte)(0xff & (hostAddress >> 16)),
+                (byte)(0xff & (hostAddress >> 24)) };
+
+        try {
+            return InetAddress.getByAddress(addressBytes);
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
 
     void initViews() {
         // bind view objdects
@@ -192,6 +216,15 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
         initViews();
+
+        textSeek1.requestFocus();
+
+        // get dhcp info
+        DhcpInfo dhcpInfo = getWiFiDhcpInfo();
+        String gateway = intToInetAddress(dhcpInfo.gateway).getHostAddress();
+        editDeviceIP.setText(gateway);
+        printLogToUI("Gateway: " + gateway);
     }
 }
