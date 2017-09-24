@@ -26,28 +26,29 @@ import java.util.Date;
 public class MainActivity extends AppCompatActivity {
     private static String TAG = "LedController";
 
-    Button btnSend;
-    EditText editDeviceIP;
-    EditText editDevicePort;
-    TextView textOutput;
-    TextView textSeek1;
-    TextView textSeek2;
-    TextView textSeek3;
-    SeekBar seekLed1;
-    SeekBar seekLed2;
-    SeekBar seekLed3;
-    ScrollView scrollOutput;
+    // views
+    private Button mSendButton;
+    private EditText mEditDeviceIp;
+    private EditText mEditDevicePort;
+    private TextView mTextOutput;
+    private TextView mTextSeek1;
+    private TextView mTextSeek2;
+    private TextView mTextSeek3;
+    private SeekBar mSeekbarLed1;
+    private SeekBar mSeekbarLed2;
+    private SeekBar mSeekbarLed3;
+    private ScrollView mScrollOutput;
 
-    int ledFreq1;
-    int ledFreq2;
-    int ledFreq3;
+    private Socket mDeviceConnection;
+    private OutputStream mDeviceSendStream;
 
-    private Socket deviceConnection;
-    private OutputStream deviceSendStream;
+    private HandlerThread mNetworkThread;
+    private Handler mNetworkHandler;
+    private Handler mMainHandler;
 
-    private HandlerThread networkThread;
-    private Handler networkHandler;
-    private Handler mainHandler;
+    private int mFreqLed1;
+    private int mFreqLed2;
+    private int mFreqLed3;
 
     DhcpInfo getWiFiDhcpInfo() {
         WifiManager wifiManager = (WifiManager) getSystemService(Service.WIFI_SERVICE);
@@ -70,17 +71,17 @@ public class MainActivity extends AppCompatActivity {
 
     void initViews() {
         // bind view objdects
-        editDeviceIP = (EditText) findViewById(R.id.edit_device_ip);
-        editDevicePort = (EditText) findViewById(R.id.edit_device_port);
-        scrollOutput = (ScrollView) findViewById(R.id.scroll_output);
-        btnSend = (Button) findViewById(R.id.button_send);
-        textOutput = (TextView) findViewById(R.id.text_output);
-        seekLed1 = (SeekBar) findViewById(R.id.seek_led1);
-        seekLed2 = (SeekBar) findViewById(R.id.seek_led2);
-        seekLed3 = (SeekBar) findViewById(R.id.seek_led3);
-        textSeek1 = (TextView) findViewById(R.id.text_seek1);
-        textSeek2 = (TextView) findViewById(R.id.text_seek2);
-        textSeek3 = (TextView) findViewById(R.id.text_seek3);
+        mEditDeviceIp = (EditText) findViewById(R.id.edit_device_ip);
+        mEditDevicePort = (EditText) findViewById(R.id.edit_device_port);
+        mScrollOutput = (ScrollView) findViewById(R.id.scroll_output);
+        mSendButton = (Button) findViewById(R.id.button_send);
+        mTextOutput = (TextView) findViewById(R.id.text_output);
+        mSeekbarLed1 = (SeekBar) findViewById(R.id.seek_led1);
+        mSeekbarLed2 = (SeekBar) findViewById(R.id.seek_led2);
+        mSeekbarLed3 = (SeekBar) findViewById(R.id.seek_led3);
+        mTextSeek1 = (TextView) findViewById(R.id.text_seek1);
+        mTextSeek2 = (TextView) findViewById(R.id.text_seek2);
+        mTextSeek3 = (TextView) findViewById(R.id.text_seek3);
 
         // register callbacks
         SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() {
@@ -88,14 +89,14 @@ public class MainActivity extends AppCompatActivity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     if (seekBar.getId() == R.id.seek_led1) {
-                        ledFreq1 = progress;
-                        textSeek1.setText(Integer.toString(ledFreq1));
+                        mFreqLed1 = progress;
+                        mTextSeek1.setText(Integer.toString(mFreqLed1));
                     } else if (seekBar.getId() == R.id.seek_led2) {
-                        ledFreq2 = progress;
-                        textSeek2.setText(Integer.toString(ledFreq2));
+                        mFreqLed2 = progress;
+                        mTextSeek2.setText(Integer.toString(mFreqLed2));
                     } else if (seekBar.getId() == R.id.seek_led3) {
-                        ledFreq3 = progress;
-                        textSeek3.setText(Integer.toString(ledFreq3));
+                        mFreqLed3 = progress;
+                        mTextSeek3.setText(Integer.toString(mFreqLed3));
                     }
                 }
             }
@@ -108,15 +109,15 @@ public class MainActivity extends AppCompatActivity {
             public void onStopTrackingTouch(SeekBar seekBar) {
             }
         };
-        seekLed1.setOnSeekBarChangeListener(listener);
-        seekLed2.setOnSeekBarChangeListener(listener);
-        seekLed3.setOnSeekBarChangeListener(listener);
+        mSeekbarLed1.setOnSeekBarChangeListener(listener);
+        mSeekbarLed2.setOnSeekBarChangeListener(listener);
+        mSeekbarLed3.setOnSeekBarChangeListener(listener);
 
-        btnSend.setOnClickListener(new View.OnClickListener() {
+        mSendButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                CharSequence devIP = editDeviceIP.getText();
-                CharSequence devPort = editDevicePort.getText();
+                CharSequence devIP = mEditDeviceIp.getText();
+                CharSequence devPort = mEditDevicePort.getText();
                 if (!isValidIP(devIP)) {
                     printLogToUI("IP invalid!");
                     return;
@@ -134,13 +135,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void connectToDevice(final String host, final int port) {
-        networkHandler.post(new Runnable() {
+        mNetworkHandler.post(new Runnable() {
             @Override
             public void run() {
                 try {
-                    deviceConnection = new Socket(host, port);
-                    deviceSendStream = deviceConnection.getOutputStream();
-                    mainHandler.post(new Runnable() {
+                    mDeviceConnection = new Socket(host, port);
+                    mDeviceSendStream = mDeviceConnection.getOutputStream();
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             printLogToUI("connect to device success!");
@@ -148,7 +149,7 @@ public class MainActivity extends AppCompatActivity {
                     });
                 } catch (IOException e) {
                     e.printStackTrace();
-                    mainHandler.post(new Runnable() {
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             printLogToUI("connect to device failed!");
@@ -160,15 +161,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void disconnectDevice() {
-        networkHandler.post(new Runnable() {
+        mNetworkHandler.post(new Runnable() {
             @Override
             public void run() {
                 try {
-                    if (deviceConnection == null) return;
-                    deviceConnection.close();
-                    deviceConnection = null;
-                    deviceSendStream = null;
-                    mainHandler.post(new Runnable() {
+                    if (mDeviceConnection == null) return;
+                    mDeviceConnection.close();
+                    mDeviceConnection = null;
+                    mDeviceSendStream = null;
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             printLogToUI("device connection close success!");
@@ -176,7 +177,7 @@ public class MainActivity extends AppCompatActivity {
                     });
                 } catch (IOException e) {
                     e.printStackTrace();
-                    mainHandler.post(new Runnable() {
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             printLogToUI("device connection close failed!");
@@ -188,17 +189,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void sendDeviceControlCommand() {
-        networkHandler.post(new Runnable() {
+        mNetworkHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (deviceSendStream == null) {
+                if (mDeviceSendStream == null) {
                     Log.d(TAG, "device connection not established!");
                     return;
                 }
-                byte[] command = {0x03, 0x00, 0x00, 0x00, 0x4D, 0x3C, 0x2B, 0x1A, (byte) ledFreq1, (byte) ledFreq2, (byte) ledFreq3};
+                byte[] command = {0x03, 0x00, 0x00, 0x00, 0x4D, 0x3C, 0x2B, 0x1A, (byte) mFreqLed1, (byte) mFreqLed2, (byte) mFreqLed3};
                 try {
-                    deviceSendStream.write(command);
-                    mainHandler.post(new Runnable() {
+                    mDeviceSendStream.write(command);
+                    mMainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             printLogToUI("control command send success!");
@@ -218,18 +219,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void printLogToUI(CharSequence line) {
-        if (textOutput.getText() == null || line == null) return;
+        if (mTextOutput.getText() == null || line == null) return;
         String newContent = "";
-        if (textOutput.getText().length() > 0) {
-            newContent += textOutput.getText().toString();
+        if (mTextOutput.getText().length() > 0) {
+            newContent += mTextOutput.getText().toString();
         }
         if (line.length() > 0) {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss SSS");
             newContent += "[" + sdf.format(new Date()) + "] " + line.toString() + "\n";
             Log.d(TAG, line.toString());
         }
-        textOutput.setText(newContent);
-        scrollOutput.fullScroll(ScrollView.FOCUS_DOWN);
+        mTextOutput.setText(newContent);
+        mScrollOutput.fullScroll(ScrollView.FOCUS_DOWN);
     }
 
     private boolean isValidIP(CharSequence devIP) {
@@ -247,7 +248,7 @@ public class MainActivity extends AppCompatActivity {
         // get dhcp info
         DhcpInfo dhcpInfo = getWiFiDhcpInfo();
         String gateway = intToInetAddress(dhcpInfo.gateway).getHostAddress();
-        editDeviceIP.setText(gateway);
+        mEditDeviceIp.setText(gateway);
         printLogToUI("Gateway: " + gateway);
     }
 
@@ -258,13 +259,13 @@ public class MainActivity extends AppCompatActivity {
 
         initViews();
 
-        textSeek1.requestFocus();
+        mTextSeek1.requestFocus();
 
-        networkThread = new HandlerThread("AppNetworkHandlerThread");
-        networkThread.start();
+        mNetworkThread = new HandlerThread("AppNetworkHandlerThread");
+        mNetworkThread.start();
 
-        networkHandler = new Handler(networkThread.getLooper());
-        mainHandler = new Handler();
+        mNetworkHandler = new Handler(mNetworkThread.getLooper());
+        mMainHandler = new Handler();
 
         updateDeviceIP();
     }
