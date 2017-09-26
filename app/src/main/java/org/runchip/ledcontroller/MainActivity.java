@@ -3,7 +3,6 @@ package org.runchip.ledcontroller;
 import android.app.Service;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
-import android.os.HandlerThread;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,13 +14,11 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.Socket;
-import java.net.UnknownHostException;
+import org.runchip.utils.NetUtils;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
+
 
 public class MainActivity extends AppCompatActivity {
     private static String TAG = "LedController";
@@ -39,12 +36,7 @@ public class MainActivity extends AppCompatActivity {
     private SeekBar mSeekbarLed3;
     private ScrollView mScrollOutput;
 
-    private Socket mDeviceConnection;
-    private OutputStream mDeviceSendStream;
-
-    private HandlerThread mNetworkThread;
-    private Handler mNetworkHandler;
-    private Handler mMainHandler;
+    private NetworkThread mNetworkThread;
 
     private int mFreqLed1;
     private int mFreqLed2;
@@ -55,21 +47,7 @@ public class MainActivity extends AppCompatActivity {
         return wifiManager.getDhcpInfo();
     }
 
-    public static InetAddress intToInetAddress(int hostAddress) {
-        byte[] addressBytes = { (byte)(0xff & hostAddress),
-                (byte)(0xff & (hostAddress >> 8)),
-                (byte)(0xff & (hostAddress >> 16)),
-                (byte)(0xff & (hostAddress >> 24)) };
-
-        try {
-            return InetAddress.getByAddress(addressBytes);
-        } catch (UnknownHostException e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
-
-    void initViews() {
+    void bindViews() {
         // bind view objdects
         mEditDeviceIp = (EditText) findViewById(R.id.edit_device_ip);
         mEditDevicePort = (EditText) findViewById(R.id.edit_device_port);
@@ -118,104 +96,53 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 CharSequence devIP = mEditDeviceIp.getText();
                 CharSequence devPort = mEditDevicePort.getText();
-                if (!isValidIP(devIP)) {
+                if (!NetUtils.isValidIP(devIP)) {
                     printLogToUI("IP invalid!");
                     return;
                 }
-                if (!isValidPort(devPort)) {
+                if (!NetUtils.isValidPort(devPort)) {
                     printLogToUI("Port invalid!");
                     return;
                 }
 
-                connectToDevice(devIP.toString(), Integer.parseInt(devPort.toString()));
-                sendDeviceControlCommand();
-                disconnectDevice();
-            }
-        });
-    }
+                mNetworkThread.connect(devIP.toString(), Integer.parseInt(devPort.toString()), new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("connect to device success!");
+                    }
+                }, new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("connect to device failed!");
+                    }
+                });
 
-    private void connectToDevice(final String host, final int port) {
-        mNetworkHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    mDeviceConnection = new Socket(host, port);
-                    mDeviceSendStream = mDeviceConnection.getOutputStream();
-                    mMainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            printLogToUI("connect to device success!");
-                        }
-                    });
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    mMainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            printLogToUI("connect to device failed!");
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    private void disconnectDevice() {
-        mNetworkHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (mDeviceConnection == null) return;
-                    mDeviceConnection.close();
-                    mDeviceConnection = null;
-                    mDeviceSendStream = null;
-                    mMainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            printLogToUI("device connection close success!");
-                        }
-                    });
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    mMainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            printLogToUI("device connection close failed!");
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    private void sendDeviceControlCommand() {
-        mNetworkHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (mDeviceSendStream == null) {
-                    Log.d(TAG, "device connection not established!");
-                    return;
-                }
                 byte[] command = {0x03, 0x00, 0x00, 0x00, 0x4D, 0x3C, 0x2B, 0x1A, (byte) mFreqLed1, (byte) mFreqLed2, (byte) mFreqLed3};
-                try {
-                    mDeviceSendStream.write(command);
-                    mMainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            printLogToUI("control command send success!");
-                        }
-                    });
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                mNetworkThread.send(command, new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("control command send success!");
+                    }
+                }, new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("control command send failed!");
+                    }
+                });
+
+                mNetworkThread.disconnect(new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("device connection close success!");
+                    }
+                }, new Runnable() {
+                    @Override
+                    public void run() {
+                        printLogToUI("device connection close failed!");
+                    }
+                });
             }
         });
-    }
-
-    private boolean isValidPort(CharSequence devPort) {
-        if (devPort == null || devPort.length() == 0) return false;
-        int port = Integer.parseInt(devPort.toString());
-        return 0 <= port && port <= 65535;
     }
 
     private void printLogToUI(CharSequence line) {
@@ -233,21 +160,11 @@ public class MainActivity extends AppCompatActivity {
         mScrollOutput.fullScroll(ScrollView.FOCUS_DOWN);
     }
 
-    private boolean isValidIP(CharSequence devIP) {
-        if (devIP == null || devIP.length() == 0) return false;
-        String[] nums = devIP.toString().split("\\.");
-        if (nums.length != 4) return false;
-        for (int i = 0; i < nums.length; i++) {
-            int n = Integer.parseInt(nums[i]);
-            if (n < 0 || n > 255) return false;
-        }
-        return true;
-    }
 
     private void updateDeviceIP() {
         // get dhcp info
         DhcpInfo dhcpInfo = getWiFiDhcpInfo();
-        String gateway = intToInetAddress(dhcpInfo.gateway).getHostAddress();
+        String gateway = NetUtils.intToInetAddress(dhcpInfo.gateway).getHostAddress();
         mEditDeviceIp.setText(gateway);
         printLogToUI("Gateway: " + gateway);
     }
@@ -257,17 +174,24 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        initViews();
-
+        bindViews();
         mTextSeek1.requestFocus();
 
-        mNetworkThread = new HandlerThread("AppNetworkHandlerThread");
-        mNetworkThread.start();
-
-        mNetworkHandler = new Handler(mNetworkThread.getLooper());
-        mMainHandler = new Handler();
+        mNetworkThread = new NetworkThread(new Handler());
 
         updateDeviceIP();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        mNetworkThread.start();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        mNetworkThread.quit();
     }
 
     @Override
