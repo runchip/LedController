@@ -87,7 +87,7 @@
                 android:id="@+id/seek_led1"
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
-                android:max="50" />
+                android:max="20" />
         </LinearLayout>
 
         <LinearLayout
@@ -112,7 +112,7 @@
                 android:id="@+id/seek_led2"
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
-                android:max="50" />
+                android:max="20" />
         </LinearLayout>
 
         <LinearLayout
@@ -137,7 +137,7 @@
                 android:id="@+id/seek_led3"
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
-                android:max="50" />
+                android:max="20" />
         </LinearLayout>
 
         <ScrollView
